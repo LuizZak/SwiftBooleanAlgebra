@@ -1,0 +1,207 @@
+{
+	"tasks": {
+		"version": "2.0.0",
+		"problemMatcher": [
+			// Compilation
+			{
+				"owner": "swift",
+				"fileLocation": "autoDetect",
+				"pattern": {
+					"regexp": "^(.*):(\\d+):(\\d+):\\s+(warning|error):\\s+(.*)$",
+					"file": 1,
+					"line": 2,
+					"column": 3,
+					"severity": 4,
+					"message": 5,
+				},
+			},
+			// Fix to detect unit test executions, which do not feature a column during reporting
+			{
+				"owner": "swift",
+				"fileLocation": "autoDetect",
+				"pattern": {
+					"regexp": "^(.*):(\\d+):\\s+(warning|error):\\s+(.*)$",
+					"file": 1,
+					"line": 2,
+					"severity": 3,
+					"message": 4,
+				},
+			},
+		],
+		"tasks": [
+            {
+				"label": "Build All",
+				"type": "shell",
+				"command": "swift",
+				"group": {
+					"kind": "build",
+					"isDefault": true
+				},
+				"args": [
+					"build",
+					"--build-tests",
+				],
+			},
+            {
+				"label": "Build Release",
+				"type": "shell",
+				"command": "swift",
+				"group": {
+					"kind": "build",
+					"isDefault": true
+				},
+				"args": [
+					"build",
+					"-c=release",
+				],
+			},
+            {
+				"label": "Test",
+				"type": "shell",
+				"command": "swift",
+				"group": {
+					"kind": "test",
+					"isDefault": true
+				},
+				"args": [
+					"test",
+					"--enable-code-coverage",
+				],
+			},
+            {
+				"label": "Test (release)",
+				"type": "shell",
+				"command": "swift",
+				"group": "test",
+				"args": [
+					"test",
+					"-c", "release",
+				],
+			},
+		],
+	},
+	"folders": [
+		{
+			"path": ".",
+			"build": "./.build",
+		}
+	],
+	"launch": {
+		"inputs": [
+			{
+				"id": "test_filter",
+				"type": "promptString",
+				"description": "Filter to pass to swift test --filter"
+			}
+		],
+		"configurations": [
+			{
+				"type": "lldb",
+				"request": "launch",
+				"name": "Debug BooleanAlgebra",
+				"program": "${workspaceFolder:BooleanAlgebra}/.build/debug/BooleanAlgebra",
+				"args": [],
+				"cwd": "${workspaceFolder:BooleanAlgebra}",
+				"preLaunchTask": "Build All"
+			},
+			{
+				"type": "lldb",
+				"request": "launch",
+				"name": "Release BooleanAlgebra",
+				"program": "${workspaceFolder:BooleanAlgebra}/.build/release/BooleanAlgebra",
+				"args": [],
+				"cwd": "${workspaceFolder:BooleanAlgebra}",
+				"preLaunchTask": "Build Release"
+			},
+			{
+				"type": "lldb",
+				"request": "launch",
+				"name": "Test BooleanAlgebra",
+				"program": "./.build/debug/BooleanAlgebraPackageTests.xctest",
+				"cwd": "${workspaceFolder:BooleanAlgebra}",
+				"preLaunchTask": "Build All"
+			},
+			{
+				"type": "lldb",
+				"request": "launch",
+				"name": "Test BooleanAlgebra (filtered)",
+				"program": "./.build/debug/BooleanAlgebraPackageTests.xctest",
+				"args": [
+					"${input:test_filter}"
+				],
+				"cwd": "${workspaceFolder:BooleanAlgebra}",
+				"preLaunchTask": "Build All"
+			},
+			{
+				"type": "lldb",
+				"request": "launch",
+				"name": "Debug App",
+				"program": "${workspaceFolder}/.build/debug/App",
+				"args": [],
+				"cwd": "${workspaceFolder:BooleanAlgebra}",
+				"preLaunchTask": "Build All"
+			},
+			{
+				"type": "lldb",
+				"request": "launch",
+				"name": "Release App",
+				"program": "${workspaceFolder}/.build/release/App",
+				"args": [],
+				"cwd": "${workspaceFolder:BooleanAlgebra}",
+				"preLaunchTask": "Build Release"
+			}
+		]
+	},
+	"settings": {
+		"files.eol": "\n",
+		"files.insertFinalNewline": true,
+		"files.exclude": {
+			".git": true,
+			".build": true,
+			".*.sw?": true,
+			"**/.DS_Store": true,
+		},
+		"commentAnchors.workspace.excludeFiles": "**/{node_modules,.git,.idea,target,out,build,vendor,.build,.swiftpm}/**/*",
+		"commentAnchors.tags.anchors": {
+            "MARK:": {
+                "iconColor": "default",
+                "highlightColor": "#A8C023",
+                "scope": "file",
+            },
+            "TODO:": {
+                "iconColor": "blue",
+                "highlightColor": "#3ea8ff",
+                "scope": "workspace",
+            },
+            "FIXME:": {
+                "iconColor": "red",
+                "highlightColor": "#F44336",
+                "scope": "workspace",
+            },
+            "NOTE:": {
+                "iconColor": "orange",
+                "highlightColor": "#FFB300",
+                "scope": "file",
+            },
+        },
+
+		"ShortcutMenuBar.userButton01Command": "workbench.action.tasks.runTask|Build All",
+		"ShortcutMenuBar.userButton02Command": "workbench.action.tasks.runTask|Test",
+		"ShortcutMenuBar.userButton03Command": "workbench.action.tasks.runTask|Test (release)",
+
+        "swift.buildArguments": [],
+		"swift.autoGenerateLaunchConfigurations": false,
+		"cSpell.words": [
+			"ANTLR",
+			"bitmask",
+			"bitmasks",
+			"Canonicalizer",
+			"xtest"
+		],
+	},
+	"extensions": {
+		"recommendations": [
+			"exodiusstudios.comment-anchors",
+		],
+	},
+}

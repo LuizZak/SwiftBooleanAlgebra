@@ -1,0 +1,14 @@
+{
+  "pins" : [
+    {
+      "identity" : "minilexer",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/LuizZak/MiniLexer.git",
+      "state" : {
+        "branch" : "master",
+        "revision" : "c614d432f1ef6873761d99141d4363a6d9b08d43"
+      }
+    }
+  ],
+  "version" : 2
+}
