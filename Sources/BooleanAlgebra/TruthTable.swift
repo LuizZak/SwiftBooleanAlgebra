@@ -16,19 +16,46 @@ public struct TruthTable: Hashable {
         self.rows = rows
     }
 
-    /// Represents a single row in a truth table.
-    public struct Row: Hashable {
-        /// The toggle values for each variable on this row.
-        public var values: [Bool]
-
-        /// The final value of the expression when each variable is set to their
-        /// respective values on the `values` array.
-        public var result: Bool
-
-        public init(values: [Bool], result: Bool) {
-            self.values = values
-            self.result = result
+    /// Returns `true` iff every `true` output of this table shares the same
+    /// common `true` inputs as `other`. If there is a set of variables that is
+    /// not shared between the two truth tables, they are ignored in the process.
+    public func equivalent(to other: TruthTable) -> Bool {
+        if variables.isEmpty {
+            return other.rows.allSatisfy({ $0.result == rows[0].result })
         }
+        if other.variables.isEmpty {
+            return rows.allSatisfy({ $0.result == other.rows[0].result })
+        }
+
+        func variableIndices(_ variables: [String], _ table: TruthTable) -> [Int] {
+            table.variables.enumerated().filter({ variables.contains($0.element) }).map(\.offset)
+        }
+
+        let common: [String] = Set(variables).intersection(other.variables).sorted()
+        let selfIndices = variableIndices(common, self)
+        let otherIndices = variableIndices(common, other)
+
+        func validate(smaller: (TruthTable, [Int]), larger: (TruthTable, [Int])) -> Bool {
+            for row in smaller.0.rows.filter({ $0.result }) {
+                let inputs = row.values.pick(smaller.1)
+
+                for otherRow in larger.0.rows {
+                    let otherInputs = otherRow.values.pick(larger.1)
+
+                    if inputs == otherInputs && row.result != otherRow.result {
+                        return false
+                    }
+                }
+            }
+
+            return true
+        }
+
+        if rows.count < other.rows.count {
+            return validate(smaller: (self, selfIndices), larger: (other, otherIndices))
+        }
+
+        return validate(smaller: (other, otherIndices), larger: (self, selfIndices))
     }
 
     /// Converts this truth table into a presentable ASCII string representation.
@@ -85,6 +112,20 @@ public struct TruthTable: Hashable {
         return lines.joined(separator: "\n")
     }
 
+    /// Represents a single row in a truth table.
+    public struct Row: Hashable {
+        /// The toggle values for each variable on this row.
+        public var values: [Bool]
+
+        /// The final value of the expression when each variable is set to their
+        /// respective values on the `values` array.
+        public var result: Bool
+
+        public init(values: [Bool], result: Bool) {
+            self.values = values
+            self.result = result
+        }
+    }
 }
 
 extension TruthTable: CustomStringConvertible {
@@ -96,5 +137,12 @@ extension TruthTable: CustomStringConvertible {
 extension TruthTable.Row: CustomStringConvertible {
     public var description: String {
         return "Row(values: \(values), result: \(result))"
+    }
+}
+
+fileprivate extension Collection {
+    /// Picks a small section of this collection by means of a sequence of indices.
+    func pick(_ indices: any Sequence<Index>) -> [Element] {
+        indices.map { self[$0] }
     }
 }

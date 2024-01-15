@@ -4,6 +4,10 @@ extension InternalRepresentation {
 
         let value: Bool
 
+        override var description: String {
+            ".constant(\(value))"
+        }
+
         init(value: Bool) {
             self.value = value
         }

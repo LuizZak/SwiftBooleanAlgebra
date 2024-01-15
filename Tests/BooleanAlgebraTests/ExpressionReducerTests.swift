@@ -30,6 +30,15 @@ class ExpressionReducerTests: XCTestCase {
         runReduceStep(¬("a" + ¬"b"), expected: ¬"a" * ¬(¬"b"), step: ExpressionReducer.deMorganLaw)
     }
 
+    func testReduce_inverseDeMorganLaw() {
+        // AND form
+        runReduceStep(¬"a" + ¬"b", expected: ¬("a" * "b"), step: ExpressionReducer.inverseDeMorganLaw)
+        runReduceStep(¬"a" + ¬(¬"b"), expected: ¬("a" * ¬"b"), step: ExpressionReducer.inverseDeMorganLaw)
+        // OR form
+        runReduceStep(¬"a" * ¬"b", expected: ¬("a" + "b"), step: ExpressionReducer.inverseDeMorganLaw)
+        runReduceStep(¬"a" * ¬(¬"b"), expected: ¬("a" + ¬"b"), step: ExpressionReducer.inverseDeMorganLaw)
+    }
+
     func testReduce_idempotentLaw() {
         runReduceStep("a" * "a", expected: "a", step: ExpressionReducer.idempotentLaw)
         runReduceStep("a" + "a", expected: "a", step: ExpressionReducer.idempotentLaw)
@@ -106,7 +115,12 @@ class ExpressionReducerTests: XCTestCase {
         )
         runReduceStep(
             ("a" + "b") * ("c" * "d"),
-            expected: "a" * "c" + "a" * "d" + "b" * "c" + "b" * "d",
+            expected: "a" * "c" * "d" + "b" * "c" * "d",
+            step: ExpressionReducer.distributiveLaw
+        )
+        runReduceStep(
+            ("a" + "b") * ("a" + "c"),
+            expected: "a" * "a" + "a" * "c" + "b" * "a" + "b" * "c",
             step: ExpressionReducer.distributiveLaw
         )
     }
@@ -134,24 +148,61 @@ class ExpressionReducerTests: XCTestCase {
     }
 
     func testReduce_inverseDistributiveLaw_conjunction() throws {
-        let exprStr = "(a + b + c) * (a + d)"
-        let expr = try parse(exprStr)
-
         runReduceStep(
-            expr,
+            try parse("(a + b + c) * (a + d)"),
             expected: "a" * ("b" + "c" + "d"),
+            step: ExpressionReducer.inverseDistributiveLaw
+        )
+        runReduceStep(
+            ("a" + "b") * ("a" + "c"),
+            expected: "a" * ("b" + "c"),
+            step: ExpressionReducer.inverseDistributiveLaw
+        )
+        runReduceStep(
+            ("a" + "b") * ("a" + "c") * "d",
+            expected: "a" * ("b" + "c") * "d",
+            step: ExpressionReducer.inverseDistributiveLaw
+        )
+        runReduceStep(
+            ("a" + "b") * ("a" + "c") * ("d" + "e"),
+            expected: "a" * ("b" + "c") * ("d" + "e"),
             step: ExpressionReducer.inverseDistributiveLaw
         )
     }
 
     func testReduce_inverseDistributiveLaw_disjunction() throws {
-        let exprStr = "(a * b * c) + (a * d)"
-        let expr = try parse(exprStr)
-
         runReduceStep(
-            expr,
-            expected: "a" + ("b" * "c" * "d"),
+            try parse("(a * b * c) + (a * d)"),
+            expected: "a" * ("b" * "c" + "d"),
             step: ExpressionReducer.inverseDistributiveLaw
+        )
+        runReduceStep(
+            ("a" * "b") + ("a" * "c"),
+            expected: "a" * ("b" + "c"),
+            step: ExpressionReducer.inverseDistributiveLaw
+        )
+        runReduceStep(
+            ("a" * "b") + ("a" * "c") + "d",
+            expected: "a" * ("b" + "c") + "d",
+            step: ExpressionReducer.inverseDistributiveLaw
+        )
+        runReduceStep(
+            ("a" * "b") + ("a" * "c") + ("d" * "e"),
+            expected: "a" * ("b" + "c") + ("d" * "e"),
+            step: ExpressionReducer.inverseDistributiveLaw
+        )
+    }
+
+    func testReduce_expandsExclusiveDisjunction() throws {
+        runReduceStep(
+           "a" ^ "b",
+            expected: ("a" + "b") * !("a" * "b"),
+            step: ExpressionReducer.expandExclusiveDisjunction
+        )
+        runReduceStep(
+            "a" ^ "b" ^ "c",
+            expected: ¬("c" * ¬("a" * "b") * ("a" + "b")) * ("c" + ¬("a" * "b") * ("a" + "b")),
+            step: ExpressionReducer.expandExclusiveDisjunction
         )
     }
 
@@ -180,6 +231,14 @@ class ExpressionReducerTests: XCTestCase {
             try parse("(a * ¬b * ¬c) + (a * b * ¬c) + (a * ¬b * c) + (a * b * c)"),
             expected: "a"
         )
+        runReduce(
+           "a" ^ "b",
+            expected: "a" * ¬"b" + ¬"a" * "b"
+        )
+        runReduce(
+            "a" ^ "b" ^ "c",
+            expected: try parse("c * ¬a * ¬b + ¬c * (a * ¬b + b * ¬a)")
+        )
     }
 
     // MARK: Test internals
@@ -196,8 +255,18 @@ class ExpressionReducerTests: XCTestCase {
         let expectedCanonical = ExpressionCanonicalizer.canonicalize(expected)
 
         XCTAssertEqual(resultCanonical, expectedCanonical, line: line)
-        
-        if resultCanonical != expectedCanonical && resultCanonical.description == expectedCanonical.description {
+
+        if !input.generateTruthTable().equivalent(to: resultCanonical.generateTruthTable()) {
+            XCTFail("Reduction produced different equation:", line: line)
+            print("Original:\n\(input.generateTruthTable().toAsciiTable(includeExpression: true))")
+            print("New:\n\(resultCanonical.generateTruthTable().toAsciiTable(includeExpression: true))")
+        }
+
+        guard resultCanonical != expectedCanonical else {
+            return
+        }
+
+        if resultCanonical.description == expectedCanonical.description {
             print("Result:  ", resultCanonical.debugDescription)
             print("Expected:", expectedCanonical.debugDescription)
         }
@@ -214,9 +283,14 @@ class ExpressionReducerTests: XCTestCase {
         step(sut)()
         let result = sut.toExpression()
 
-
         let resultCanonical = ExpressionCanonicalizer.canonicalize(result)
         let expectedCanonical = ExpressionCanonicalizer.canonicalize(expected)
+
+        if !input.generateTruthTable().equivalent(to: resultCanonical.generateTruthTable()) {
+            XCTFail("Reduction produced different equation:", line: line)
+            print("Original:\n\(input.generateTruthTable().toAsciiTable(includeExpression: true))")
+            print("New:\n\(resultCanonical.generateTruthTable().toAsciiTable(includeExpression: true))")
+        }
 
         XCTAssertEqual(resultCanonical, expectedCanonical, line: line)
         

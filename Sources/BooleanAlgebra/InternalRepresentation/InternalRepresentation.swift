@@ -1,4 +1,4 @@
-internal class InternalRepresentation: Hashable, Comparable {
+internal class InternalRepresentation: Hashable, Comparable, CustomStringConvertible {
     /// Gets the list of direct sub-expressions contained within this expression.
     var subExpressions: [InternalRepresentation] { [] }
 
@@ -45,6 +45,9 @@ internal class InternalRepresentation: Hashable, Comparable {
     }
 
     var discriminant: Discriminant { fatalError("Subclasses must override \(#function)") }
+
+    /// Gets a string representation of this expression.
+    var description: String { fatalError("Subclasses must override \(#function)") }
 
     init() {
 
@@ -328,31 +331,35 @@ internal class InternalRepresentation: Hashable, Comparable {
     }
 
     static func from(_ expression: Expression) -> InternalRepresentation {
+        let result: InternalRepresentation
+
         switch expression {
         case .and(let lhs, let rhs):
-            return And(operands: [from(lhs), from(rhs)]).flattened()
+            result = And(operands: [from(lhs), from(rhs)])
 
         case .or(let lhs, let rhs):
-            return Or(operands: [from(lhs), from(rhs)]).flattened()
+            result = Or(operands: [from(lhs), from(rhs)])
 
         case .xor(let lhs, let rhs):
-            return Xor(operands: [from(lhs), from(rhs)]).flattened()
+            result = Xor(operands: [from(lhs), from(rhs)])
 
         case .not(let expr):
-            return Not(operand: from(expr))
+            result = Not(operand: from(expr))
 
         case .parenthesized(let expr):
-            return from(expr)
+            result = from(expr)
 
         case .variable(let ident):
-            return Variable(name: ident)
+            result = Variable(name: ident)
 
         case .true:
-            return Constant(value: true)
+            result = Constant(value: true)
 
         case .false:
-            return Constant(value: false)
+            result = Constant(value: false)
         }
+
+        return result.flattened()
     }
 
     /// A discriminant for the type of an expression.
@@ -379,6 +386,7 @@ extension InternalRepresentation {
             }
             didSet {
                 operands.forEach({ $0.parent = self })
+                operands = operands.map({ $0.flattened() })
             }
         }
 

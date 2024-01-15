@@ -4,6 +4,10 @@ extension InternalRepresentation {
 
         let name: String
 
+        override var description: String {
+            ".variable(\(name))"
+        }
+
         init(name: String) {
             self.name = name
         }

@@ -243,7 +243,7 @@ class ExpressionQuerier {
             let rhsCanonical = ExpressionCanonicalizer.canonicalizeInternal(rhs)
 
             return lhsCanonical == rhsCanonical
-        
+
         case .truthTableEquivalent:
             let lhsTruthTable = lhs.toExpression().generateTruthTable()
             let rhsTruthTable = rhs.toExpression().generateTruthTable()

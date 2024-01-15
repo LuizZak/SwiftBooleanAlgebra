@@ -14,6 +14,10 @@ extension InternalRepresentation {
             }
         }
 
+        override var description: String {
+            ".not(\(operand))"
+        }
+
         init(operand: InternalRepresentation) {
             self.operand = operand
 

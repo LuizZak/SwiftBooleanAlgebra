@@ -2,6 +2,10 @@ extension InternalRepresentation {
     final class Xor: Binary {
         override var discriminant: Discriminant { .xor }
 
+        override var description: String {
+            ".xor(\(operands))"
+        }
+
         override func copy() -> Xor {
             Xor(operands: operands.copy())
         }

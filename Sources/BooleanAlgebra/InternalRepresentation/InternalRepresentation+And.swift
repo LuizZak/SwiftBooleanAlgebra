@@ -2,6 +2,10 @@ extension InternalRepresentation {
     final class And: Binary {
         override var discriminant: Discriminant { .and }
 
+        override var description: String {
+            ".and(\(operands))"
+        }
+
         override func copy() -> And {
             And(operands: operands.copy())
         }

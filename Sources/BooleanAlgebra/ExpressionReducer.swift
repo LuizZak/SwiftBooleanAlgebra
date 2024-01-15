@@ -2,12 +2,14 @@
 /// simplified form with less operations, but with the same resulting truth
 /// table.
 public class ExpressionReducer {
+    typealias ExpressionPath = InternalRepresentation.ExpressionPath
+
     var querier: ExpressionQuerier
     var expression: InternalRepresentation? {
         querier.expression[path: path]
     }
 
-    var path: InternalRepresentation.ExpressionPath
+    var path: ExpressionPath
     var didWork = false
 
     public init(_ expression: Expression) {
@@ -18,13 +20,39 @@ public class ExpressionReducer {
         path = .root
     }
 
-    init(_ querier: ExpressionQuerier, path: InternalRepresentation.ExpressionPath) {
+    init(_ expression: InternalRepresentation, path: ExpressionPath) {
+        querier = ExpressionQuerier(
+            expression: ExpressionCanonicalizer.canonicalizeInternal(expression),
+            parent: .root
+        )
+        self.path = path
+    }
+
+    init(_ querier: ExpressionQuerier, path: ExpressionPath) {
         self.querier = querier
         self.path = path
     }
 
-    func makeReducer(subPath: InternalRepresentation.ExpressionPath) -> ExpressionReducer {
+    func makeReducer(subPath: ExpressionPath) -> ExpressionReducer {
         .init(querier, path: subPath)
+    }
+
+    private func _recurse(_ work: (ExpressionReducer) -> Void) {
+        guard !didWork, let expression = expression else {
+            return
+        }
+
+        for (_, subPath) in expression.subExpressionsWithLocation(parent: path) {
+            let reducer = makeReducer(subPath: subPath)
+            reducer._recurse(work)
+
+            if reducer.didWork {
+                reportDidWork()
+                return
+            }
+        }
+
+        work(self)
     }
 
     /// Returns the internal reduced expression.
@@ -44,6 +72,9 @@ public class ExpressionReducer {
     /// The process removes parenthesis from the original expression.
     public func reduce() {
         assert(path == .root, "path == .root")
+
+        // Start by expanding exclusive disjunction (xor) expressions
+        _expandExclusiveDisjunctionRecursive()
 
         // Run reduction loop for as long as the expression keeps changing
         var start: InternalRepresentation?
@@ -73,27 +104,16 @@ public class ExpressionReducer {
     }
 
     private func _reduce() {
-        guard !didWork, let expression = expression else {
-            return
+        _recurse {
+            $0.reduceBase()
         }
-
-        for (_, subPath) in expression.subExpressionsWithLocation(parent: path) {
-            let reducer = makeReducer(subPath: subPath)
-            reducer._reduce()
-
-            if reducer.didWork {
-                reportDidWork()
-                return
-            }
-        }
-
-        reduceBase()
     }
 
     private func reduceBase() {
         guard !didWork else { return }
 
         deMorganLaw()
+
         negationOfConstant()
         doubleNegation()
         idempotentLaw()
@@ -105,20 +125,34 @@ public class ExpressionReducer {
     }
 
     private func _distributiveRecursive() {
+        _recurse {
+            $0.distributiveLaw()
+        }
+    }
+
+    private func _expandExclusiveDisjunctionRecursive() {
+        _recurse {
+            $0.expandExclusiveDisjunction()
+        }
+    }
+
+    /// a ^ b = (a + b) * !(a * b)
+    func expandExclusiveDisjunction() {
         guard !didWork else { return }
-        guard let expression else { return }
+        guard let exp = expression as? InternalRepresentation.Xor else { return }
+        guard exp.operands.count >= 2 else { return }
 
-        for (_, subPath) in expression.subExpressionsWithLocation(parent: path) {
-            let reducer = makeReducer(subPath: subPath)
-            reducer._distributiveRecursive()
+        var cumulative: InternalRepresentation = exp.operands[0]
 
-            if reducer.didWork {
-                reportDidWork()
-                return
-            }
+        for operand in exp.operands.dropFirst() {
+            cumulative = InternalRepresentation.and([
+                .or([operand, cumulative]),
+                .not(.and([operand, cumulative]))
+            ])
         }
 
-        distributiveLaw()
+        querier.replace(at: path, with: cumulative)
+        reportDidWork()
     }
 
     /// ¬(¬a) = a
@@ -143,6 +177,88 @@ public class ExpressionReducer {
         }
     }
 
+    /// AND form         | OR form
+    /// -----------------|-------
+    ///  ¬(ab) = ¬a + ¬b | ¬(a + b) = ¬a¬b
+    func deMorganLaw() {
+        guard !didWork else { return }
+        guard let exp = expression as? InternalRepresentation.Not else { return }
+
+        func applyTheorem(
+            _ binary: InternalRepresentation.Binary,
+            producer: ([InternalRepresentation]) -> InternalRepresentation
+        ) {
+
+            let terms: [InternalRepresentation] = binary.operands.map {
+                .not($0)
+            }
+
+            querier.replace(at: path, with: producer(terms))
+            reportDidWork()
+        }
+
+        switch exp.operand {
+        case let exp as InternalRepresentation.And:
+            applyTheorem(exp, producer: InternalRepresentation.or)
+
+        case let exp as InternalRepresentation.Or:
+            applyTheorem(exp, producer: InternalRepresentation.and)
+
+        default:
+            break
+        }
+    }
+
+    /// AND form         | OR form
+    /// -----------------|-------
+    ///  ¬a + ¬b = ¬(ab) | ¬a¬b = ¬(a + b)
+    func inverseDeMorganLaw() {
+        guard !didWork else { return }
+
+        func applyTheorem(
+            _ binary: InternalRepresentation.Binary,
+            producer: ([InternalRepresentation]) -> InternalRepresentation,
+            remainingProducer: ([InternalRepresentation]) -> InternalRepresentation
+        ) {
+
+            let negatedOperands = binary.operands.compactMap(\.asNot)
+            guard negatedOperands.count >= 2 else {
+                return
+            }
+
+            let remaining = binary.operands.filter({ !$0.isNot })
+
+            let terms: [InternalRepresentation] = negatedOperands.map {
+                $0.operand
+            }
+
+            querier.replace(
+                at: path,
+                with: .not(remainingProducer(remaining + [producer(terms)]))
+            )
+            reportDidWork()
+        }
+
+        switch expression {
+        case let exp as InternalRepresentation.And:
+            applyTheorem(
+                exp,
+                producer: InternalRepresentation.or,
+                remainingProducer: InternalRepresentation.and
+            )
+
+        case let exp as InternalRepresentation.Or:
+            applyTheorem(
+                exp,
+                producer: InternalRepresentation.and,
+                remainingProducer: InternalRepresentation.or
+            )
+
+        default:
+            break
+        }
+    }
+
     /// AND form                  | OR form
     /// --------------------------|-------
     ///  a + bc = (a + b)(a + c)  | a(b + c + d) = ab + ac + ad
@@ -151,48 +267,12 @@ public class ExpressionReducer {
 
         switch expression {
         case let exp as InternalRepresentation.And where exp.operands.contains(where: \.isOr):
+            let collector = CommonTermCollector(exp, path: path)
+            let operations = collector.distributedTerms().map({
+                InternalRepresentation.and($0.terms.map(\.term))
+            })
 
-            var remaining = exp.operands
-            var newOperands: [InternalRepresentation] = []
-            func popNextOr() -> [InternalRepresentation]? {
-                if let index = remaining.firstIndex(where: \.isOr) {
-                    defer { remaining.remove(at: index) }
-
-                    switch remaining[index] {
-                    case let exp as InternalRepresentation.Or:
-                        return exp.operands
-                    default:
-                        fatalError("Thought item at index \(index) was an .or case?")
-                    }
-                }
-
-                return nil
-            }
-            
-            guard let nextOrTerms = popNextOr() else {
-                // Nothing to distribute?
-                break
-            }
-
-            while !remaining.isEmpty {
-                let next = remaining.removeFirst()
-
-                let terms: [InternalRepresentation]
-                switch next {
-                case let exp as InternalRepresentation.Or:
-                    terms = exp.operands
-                default:
-                    terms = [next]
-                }
-                
-                for lhs in terms {
-                    for rhs in nextOrTerms {
-                        newOperands.append(.and([lhs, rhs]))
-                    }
-                }
-            }
-
-            querier.replace(at: path, with: .or(newOperands))
+            querier.replace(at: path, with: .or(operations).flattened())
             reportDidWork()
 
         default:
@@ -206,69 +286,81 @@ public class ExpressionReducer {
     func inverseDistributiveLaw() {
         guard !didWork else { return }
 
-        func distributeBinary(
+        func collectInBinary(
             _ binary: InternalRepresentation.Binary,
-            _ discriminant: InternalRepresentation.Discriminant,
-            termProducer: ([InternalRepresentation]) -> InternalRepresentation,
-            finalFactorProducer: ([InternalRepresentation]) -> InternalRepresentation
-        ) {
+            _ discriminant: InternalRepresentation.Discriminant
+        ) -> (leadingTerm: InternalRepresentation, factors: [[InternalRepresentation]], remaining: [InternalRepresentation])? {
 
-            var newTerms: [InternalRepresentation] = []
-
+            // Pick only one valid term at a time to avoid reversing whole
+            // distributions at once
             let termCollector = CommonTermCollector(binary, path: path)
-            let terms = termCollector.maximalCompoundTerms()
-
-            guard !terms.isEmpty else {
-                return
+            guard let leadingTerm = termCollector.compoundTerms().first else {
+                return nil
             }
 
-            let leadingTerm = termProducer(terms.map(\.term))
-            var factors: [InternalRepresentation] = []
+            func isPartOfTerms(_ location: ExpressionPath) -> Bool {
+                leadingTerm.locations.contains { $0.parent == location }
+            }
+
+            var remaining: [InternalRepresentation] = []
+            var factors: [[InternalRepresentation]] = []
 
             let operands = binary.subExpressionsWithLocation(parent: path)
 
             for (operand, location) in operands {
-                guard operand.discriminant == discriminant else {
-                    newTerms.append(operand)
+                guard operand.discriminant == discriminant && isPartOfTerms(location) else {
+                    remaining.append(operand)
                     continue
                 }
 
+                var operandFactors: [InternalRepresentation] = []
+
                 for (operand, location) in operand.subExpressionsWithLocation(parent: location) {
-                    guard !terms.contains(where: { $0.locations.contains(location) }) else {
+                    guard !leadingTerm.locations.contains(location) else {
                         continue
                     }
 
-                    factors.append(operand)
+                    operandFactors.append(operand)
                 }
+
+                guard operandFactors.count > 0 else { continue }
+
+                factors.append(operandFactors)
             }
 
-            // Add final term
-            newTerms.insert(
-                termProducer([leadingTerm, finalFactorProducer(factors)]),
-                at: 0
+            return (
+                leadingTerm: leadingTerm.term,
+                factors: factors,
+                remaining: remaining
             )
-
-            querier.replace(at: path, with: finalFactorProducer(newTerms))
-
-            reportDidWork()
         }
 
         switch expression {
         case let exp as InternalRepresentation.And:
-            distributeBinary(
-                exp,
-                .or,
-                termProducer: InternalRepresentation.and,
-                finalFactorProducer: InternalRepresentation.or
-            )
+            let result = collectInBinary(exp, .or)
+
+            guard let result else { return }
+
+            // Compute final expression
+            let finalExp = InternalRepresentation.and([
+                result.leadingTerm, .or(result.factors.map(InternalRepresentation.or(_:)))
+            ] + result.remaining)
+
+            querier.replace(at: path, with: finalExp.flattened())
+            reportDidWork()
 
         case let exp as InternalRepresentation.Or:
-            distributeBinary(
-                exp,
-                .and,
-                termProducer: InternalRepresentation.or,
-                finalFactorProducer: InternalRepresentation.and
-            )
+            let result = collectInBinary(exp, .and)
+
+            guard let result else { return }
+
+            // Compute final expression
+            let finalExp = InternalRepresentation.and([
+                result.leadingTerm, .or(result.factors.map(InternalRepresentation.and(_:)))
+            ])
+
+            querier.replace(at: path, with: .or([finalExp] + result.remaining).flattened())
+            reportDidWork()
 
         default:
             break
@@ -367,6 +459,7 @@ public class ExpressionReducer {
                     return
                 }
             }
+
         case let exp as InternalRepresentation.Or:
             for e in exp.operands {
                 if exp.operands.contains(.not(e).flattened()) {
@@ -423,38 +516,6 @@ public class ExpressionReducer {
                     }
                 }
             }
-
-        default:
-            break
-        }
-    }
-
-    /// AND form         | OR form
-    /// -----------------|-------
-    ///  ¬(ab) = ¬a + ¬b | ¬(a + b) = ¬a¬b
-    func deMorganLaw() {
-        guard !didWork else { return }
-        guard let exp = expression as? InternalRepresentation.Not else { return }
-
-        func applyTheorem(
-            _ binary: InternalRepresentation.Binary,
-            producer: ([InternalRepresentation]) -> InternalRepresentation
-        ) {
-
-            let terms: [InternalRepresentation] = binary.operands.map {
-                .not($0)
-            }
-
-            querier.replace(at: path, with: producer(terms))
-            reportDidWork()
-        }
-
-        switch exp.operand {
-        case let exp as InternalRepresentation.And:
-            applyTheorem(exp, producer: InternalRepresentation.or)
-
-        case let exp as InternalRepresentation.Or:
-            applyTheorem(exp, producer: InternalRepresentation.and)
 
         default:
             break

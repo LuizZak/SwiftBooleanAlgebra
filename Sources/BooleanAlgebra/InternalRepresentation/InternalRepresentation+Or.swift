@@ -2,6 +2,10 @@ extension InternalRepresentation {
     final class Or: Binary {
         override var discriminant: Discriminant { .or }
 
+        override var description: String {
+            ".or(\(operands))"
+        }
+
         override func copy() -> Or {
             Or(operands: operands.copy())
         }
